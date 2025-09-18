@@ -68,7 +68,7 @@
 use itertools::*;
 use log::{info, warn};
 use semver::{Version, VersionReq};
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::PathBuf, process, str::FromStr};
 
 use crate::{config::*, error::*, resource::*};
@@ -86,8 +86,9 @@ use crate::{config::*, error::*, resource::*};
 /// assert_eq!(CMakeGenerator::from_str("VisualStudio").unwrap(), CMakeGenerator::VisualStudio);
 /// assert!(CMakeGenerator::from_str("MySuperBuilder").is_err());
 /// ```
-#[derive(Deserialize, PartialEq, Debug, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Default)]
 pub enum CMakeGenerator {
+    #[default]
     /// Use platform default generator (without -G option)
     Platform,
     /// Unix Makefile
@@ -98,12 +99,6 @@ pub enum CMakeGenerator {
     VisualStudio,
     /// Visual Studio 15 2017 Win64
     VisualStudioWin64,
-}
-
-impl Default for CMakeGenerator {
-    fn default() -> Self {
-        CMakeGenerator::Platform
-    }
 }
 
 impl FromStr for CMakeGenerator {
@@ -154,18 +149,13 @@ impl CMakeGenerator {
 }
 
 /// CMake build type
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Default)]
 pub enum BuildType {
     Debug,
+    #[default]
     Release,
     RelWithDebInfo,
     MinSizeRel,
-}
-
-impl Default for BuildType {
-    fn default() -> Self {
-        BuildType::Release
-    }
 }
 
 impl FromStr for BuildType {
@@ -185,7 +175,7 @@ impl FromStr for BuildType {
 }
 
 /// LLVM Tools e.g. clang, compiler-rt, and so on.
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct Tool {
     /// Name of tool (will be downloaded into `tools/{name}` by default)
     pub name: String,
@@ -234,7 +224,7 @@ impl Tool {
 /// Setting for both Remote and Local entries. TOML setting file will be decoded into this struct.
 ///
 ///
-#[derive(Deserialize, Debug, Default, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Default, Clone, PartialEq)]
 pub struct EntrySetting {
     /// URL of remote LLVM resource, see also [resouce](../resource/index.html) module
     pub url: Option<String>,
@@ -283,7 +273,7 @@ pub enum Entry {
     },
 }
 
-fn load_entry_toml(toml_str: &str) -> Result<Vec<Entry>> {
+pub fn load_entry_toml(toml_str: &str) -> Result<Vec<Entry>> {
     let entries: HashMap<String, EntrySetting> = toml::from_str(toml_str)?;
     entries
         .into_iter()
@@ -375,56 +365,55 @@ impl Entry {
         let mut setting = EntrySetting::default();
 
         let base_url = if version <= *LLVM_9_0_0 && version != *LLVM_8_0_1 {
-            format!("http://releases.llvm.org/{}", version)
+            format!("http://releases.llvm.org/{version}")
         } else {
             format!(
-                "https://github.com/llvm/llvm-project/releases/download/llvmorg-{}",
-                version
+                "https://github.com/llvm/llvm-project/releases/download/llvmorg-{version}"
             )
         };
 
-        setting.url = Some(format!("{}/llvm-{}.src.tar.xz", base_url, version));
+        setting.url = Some(format!("{base_url}/llvm-{version}.src.tar.xz"));
 
         let clang_name = if version > *LLVM_9_0_0 { "clang" } else { "cfe" };
-        let mut clang = Tool::new("clang", &format!("{}/{}-{}.src.tar.xz", base_url, clang_name, version));
+        let mut clang = Tool::new("clang", &format!("{base_url}/{clang_name}-{version}.src.tar.xz"));
         clang.relative_path = Some("tools/clang".into());
         setting.tools.push(clang);
 
-        let mut lld = Tool::new("lld", &format!("{}/lld-{}.src.tar.xz", base_url, version));
+        let mut lld = Tool::new("lld", &format!("{base_url}/lld-{version}.src.tar.xz"));
         lld.relative_path = Some("tools/lld".into());
         setting.tools.push(lld);
 
-        let mut lldb = Tool::new("lldb", &format!("{}/lldb-{}.src.tar.xz", base_url, version));
+        let mut lldb = Tool::new("lldb", &format!("{base_url}/lldb-{version}.src.tar.xz"));
         lldb.relative_path = Some("tools/lldb".into());
         setting.tools.push(lldb);
 
-        let mut clang_tools_extra = Tool::new("clang-tools-extra", &format!("{}/clang-tools-extra-{}.src.tar.xz", base_url, version));
+        let mut clang_tools_extra = Tool::new("clang-tools-extra", &format!("{base_url}/clang-tools-extra-{version}.src.tar.xz"));
         clang_tools_extra.relative_path = Some("tools/clang/tools/extra".into());
         setting.tools.push(clang_tools_extra);
 
-        let mut polly = Tool::new("polly", &format!("{}/polly-{}.src.tar.xz", base_url, version));
+        let mut polly = Tool::new("polly", &format!("{base_url}/polly-{version}.src.tar.xz"));
         polly.relative_path = Some("tools/polly".into());
         setting.tools.push(polly);
 
         let runtime_path = if version >= *LLVM_11_0_0 { "runtimes" } else { "projects" };
 
-        let mut compiler_rt = Tool::new("compiler-rt", &format!("{}/compiler-rt-{}.src.tar.xz", base_url, version));
-        compiler_rt.relative_path = Some(format!("{}/compiler-rt", runtime_path));
+        let mut compiler_rt = Tool::new("compiler-rt", &format!("{base_url}/compiler-rt-{version}.src.tar.xz"));
+        compiler_rt.relative_path = Some(format!("{runtime_path}/compiler-rt"));
         setting.tools.push(compiler_rt);
 
-        let mut libcxx = Tool::new("libcxx", &format!("{}/libcxx-{}.src.tar.xz", base_url, version));
-        libcxx.relative_path = Some(format!("{}/libcxx", runtime_path));
+        let mut libcxx = Tool::new("libcxx", &format!("{base_url}/libcxx-{version}.src.tar.xz"));
+        libcxx.relative_path = Some(format!("{runtime_path}/libcxx"));
         setting.tools.push(libcxx);
 
-        let mut libcxxabi = Tool::new("libcxxabi", &format!("{}/libcxxabi-{}.src.tar.xz", base_url, version));
-        libcxxabi.relative_path = Some(format!("{}/libcxxabi", runtime_path));
+        let mut libcxxabi = Tool::new("libcxxabi", &format!("{base_url}/libcxxabi-{version}.src.tar.xz"));
+        libcxxabi.relative_path = Some(format!("{runtime_path}/libcxxabi"));
         setting.tools.push(libcxxabi);
 
-        let mut libunwind = Tool::new("libunwind", &format!("{}/libunwind-{}.src.tar.xz", base_url, version));
-        libunwind.relative_path = Some(format!("{}/libunwind", runtime_path));
+        let mut libunwind = Tool::new("libunwind", &format!("{base_url}/libunwind-{version}.src.tar.xz"));
+        libunwind.relative_path = Some(format!("{runtime_path}/libunwind"));
         setting.tools.push(libunwind);
 
-        let mut openmp = Tool::new("openmp", &format!("{}/openmp-{}.src.tar.xz", base_url, version));
+        let mut openmp = Tool::new("openmp", &format!("{base_url}/openmp-{version}.src.tar.xz"));
         openmp.relative_path = Some("projects/openmp".into());
         setting.tools.push(openmp);
 
@@ -465,14 +454,14 @@ impl Entry {
         })
     }
 
-    fn setting(&self) -> &EntrySetting {
+    pub fn setting(&self) -> &EntrySetting {
         match self {
             Entry::Remote { setting, .. } => setting,
             Entry::Local { setting, .. } => setting,
         }
     }
 
-    fn setting_mut(&mut self) -> &mut EntrySetting {
+    pub fn setting_mut(&mut self) -> &mut EntrySetting {
         match self {
             Entry::Remote { setting, .. } => setting,
             Entry::Local { setting, .. } => setting,
@@ -572,14 +561,14 @@ impl Entry {
     pub fn build(&self, nproc: usize) -> Result<()> {
         self.configure()?;
         process::Command::new("cmake")
-            .args(&[
+            .args([
                 "--build",
                 &format!("{}", self.build_dir()?.display()),
                 "--target",
                 "install",
             ])
             .args(
-                &self
+                self
                     .setting()
                     .generator
                     .build_option(nproc, self.setting().build_type),
@@ -619,7 +608,7 @@ impl Entry {
 
         // Other options
         for (k, v) in &setting.option {
-            opts.push(format!("-D{}={}", k, v));
+            opts.push(format!("-D{k}={v}"));
         }
 
         process::Command::new("cmake")

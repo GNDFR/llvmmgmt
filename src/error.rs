@@ -23,6 +23,9 @@ pub enum Error {
     #[error("Unsupported cmake build type: {build_type}")]
     UnsupportedBuildType { build_type: String },
 
+    #[error("Unsupported shell: {shell}")]
+    UnsupportedShell { shell: String },
+
     #[error("Configure file already exists: {path}")]
     ConfigureAlreadyExists { path: PathBuf },
 
@@ -38,8 +41,17 @@ pub enum Error {
         source: toml::de::Error,
     },
 
+    #[error(transparent)]
+    TomlSerError {
+        #[from]
+        source: toml::ser::Error,
+    },
+
     #[error("Entry {name} is invalid: {message}")]
     InvalidEntry { name: String, message: String },
+
+    #[error("Build {name} is invalid: {message}")]
+    InvalidBuild { name: String, message: String },
 
     #[error("HTTP request does not succeed with {status}: {url}")]
     HttpError {
@@ -118,7 +130,7 @@ impl CommandExt for process::Command {
     }
 
     fn check_run(&mut self) -> Result<()> {
-        let cmd = format!("{:?}", self);
+        let cmd = format!("{self:?}");
         let st = self
             .status()
             .map_err(|_| Error::CommandNotFound { cmd: cmd.clone() })?;
@@ -144,7 +156,7 @@ impl CommandExt for process::Command {
     }
 
     fn check_output(&mut self) -> Result<(String, String)> {
-        let cmd = format!("{:?}", self);
+        let cmd = format!("{self:?}");
         let output = self
             .output()
             .map_err(|_| Error::CommandNotFound { cmd: cmd.clone() })?;

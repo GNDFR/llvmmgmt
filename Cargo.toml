@@ -1,10 +1,10 @@
 [package]
 name = "llvmmgmt"
-version = "0.1.0"
+version = "21.1.1"
 authors = ["GNDFR <https://github.com/GNDFR>"]
-edition = "2018"
+edition = "2021"
 description = "Manager for LLVM/Clang builds"
-license = "MIT/Apache-2.0"
+license = "LICENSE"
 readme = "README.md"
 documentation = "https://docs.rs/llvmmgmt"
 repository    = "https://github.com/GNDFR/llvmmgmt"

@@ -2,8 +2,6 @@
 
 use glob::glob;
 use log::*;
-use regex::Regex;
-use semver::Version;
 
 use std::{
     env, fs,
@@ -101,7 +99,7 @@ impl Build {
     pub fn uninstall(&self) -> Result<()> {
         let path = self.prefix();
         info!("Remove build dir: {}", path.display());
-        fs::remove_dir_all(&path).with(&path)?;
+        fs::remove_dir_all(path).with(path)?;
         Ok(())
     }
 }
@@ -113,7 +111,7 @@ fn local_builds() -> Result<Vec<Build>> {
         .unwrap()
         .filter_map(|path| {
             if let Ok(path) = path {
-                path.parent().map(|path| Build::from_path(path))
+                path.parent().map(Build::from_path)
             } else {
                 None
             }
@@ -185,40 +183,4 @@ pub fn expand(archive: &Path, verbose: bool) -> Result<()> {
         .current_dir(data_dir()?)
         .check_run()?;
     Ok(())
-}
-
-fn parse_version(version_str: &str) -> Result<Version> {
-    let re = Regex::new(r"(\d+\.\d+\.\d+)").unwrap();
-    if let Some(caps) = re.captures(version_str) {
-        let version = caps.get(1).unwrap().as_str();
-        Version::parse(version).map_err(|_| Error::invalid_version(version))
-    } else {
-        Err(Error::invalid_version(version_str))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_version() -> Result<()> {
-        // https://github.com/termoshtt/llvmmgmt/issues/36
-        let version =
-            "clang version 6.0.1-svn331815-1~exp1~20180510084719.80 (branches/release_60)";
-        assert_eq!(parse_version(version)?, Version::new(6, 0, 1));
-
-        let version = "clang version 10.0.0 \
-            (https://github.com/llvm-mirror/clang 65acf43270ea2894dffa0d0b292b92402f80c8cb)";
-        assert_eq!(parse_version(version)?, Version::new(10, 0, 0));
-
-        let version = "123+456y0";
-        assert!(parse_version(version).is_err());
-        assert_eq!(
-            parse_version("foo 123.456.789 bar")?,
-            Version::new(123, 456, 789)
-        );
-
-        Ok(())
-    }
 }

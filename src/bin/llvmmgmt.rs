@@ -1,17 +1,17 @@
 use llvmmgmt::*;
-use llvmmgmt::error::{Result, Error, FileIoConvert};
+use llvmmgmt::error::{Error, FileIoConvert, Result};
 
 use simplelog::*;
 use std::{
-    env,
-    process::{exit},
-    fs,
     collections::HashMap,
+    env,
+    fs,
     path::PathBuf,
+    process::{exit},
 };
 use structopt::StructOpt;
 
-use crate::build::{Build, seek_build};
+use crate::build::{seek_build, Build};
 use crate::config::{config_dir, ENTRY_TOML};
 
 fn get_existing_build(name: &str) -> Result<build::Build> {
@@ -20,7 +20,10 @@ fn get_existing_build(name: &str) -> Result<build::Build> {
         Ok(build)
     } else {
         eprintln!("Build '{name}' does not exists");
-        Err(Error::InvalidBuild { name: name.into(), message: "Build does not exist".into() })
+        Err(Error::InvalidBuild {
+            name: name.into(),
+            message: "Build does not exist".into(),
+        })
     }
 }
 
@@ -60,36 +63,8 @@ enum LLVMMgmt {
     },
     #[structopt(name = "entries", about = "List all available entries")]
     Entries,
-    #[structopt(name = "build-entry", about = "Build a specific entry")]
-    BuildEntry {
-        name: String,
-        #[structopt(long, default_value = "0")]
-        nproc: usize,
-    },
-    #[structopt(name = "clean-cache", about = "Clean cache directory for an entry")]
-    CleanCache {
-        name: String,
-    },
-    #[structopt(name = "clean-build", about = "Clean build directory for an entry")]
-    CleanBuild {
-        name: String,
-    },
-    #[structopt(name = "checkout", about = "Checkout source code for an entry")]
-    Checkout {
-        name: String,
-    },
-    #[structopt(name = "update", about = "Update source code for an entry")]
-    Update {
-        name: String,
-    },
-    #[structopt(name = "set-global", about = "Set global default build")]
-    SetGlobal {
-        name: String,
-    },
-    #[structopt(name = "set-local", about = "Set local default build")]
-    SetLocal {
-        name: String,
-    },
+    #[structopt(name = "entry", about = "Manage entries")]
+    Entry(EntryCmd),
     #[structopt(name = "prefix", about = "Show current build prefix")]
     Prefix {
         #[structopt(long, short)]
@@ -109,6 +84,32 @@ enum LLVMMgmt {
     },
     #[structopt(name = "uninstall", about = "Removes a built version")]
     Uninstall {
+        name: String,
+    },
+}
+
+#[derive(StructOpt, Debug)]
+enum EntryCmd {
+    #[structopt(name = "build", about = "Build a specific entry")]
+    Build {
+        name: String,
+        #[structopt(long, default_value = "0")]
+        nproc: usize,
+    },
+    #[structopt(name = "clean-cache", about = "Clean cache directory for an entry")]
+    CleanCache {
+        name: String,
+    },
+    #[structopt(name = "clean-build", about = "Clean build directory for an entry")]
+    CleanBuild {
+        name: String,
+    },
+    #[structopt(name = "checkout", about = "Checkout source code for an entry")]
+    Checkout {
+        name: String,
+    },
+    #[structopt(name = "update", about = "Update source code for an entry")]
+    Update {
         name: String,
     },
     #[structopt(name = "set-build-type", about = "Set build type for an entry")]
@@ -133,15 +134,15 @@ fn main() -> error::Result<()> {
         LevelFilter::Info,
         ConfigBuilder::new().set_time_to_local(true).build(),
     ))
-    .unwrap();
+    .expect("Logger could not be initialized");
 
     let opt = LLVMMgmt::from_args();
     match opt {
         LLVMMgmt::Install { version } => {
             let entry = entry::load_entry(&version)?;
             let nproc = num_cpus::get();
-            entry.checkout().unwrap();
-            entry.build(nproc).unwrap();
+            entry.checkout()?;
+            entry.build(nproc)?;
             Ok(())
         }
 
@@ -162,12 +163,18 @@ fn main() -> error::Result<()> {
         }
         LLVMMgmt::List { available } => {
             if available {
-                if let Ok(entries) = entry::load_entries() {
-                    for entry in &entries {
-                        println!("{}", entry.name());
+                match entry::load_entries() {
+                    Ok(entries) => {
+                        for entry in &entries {
+                            println!("{}", entry.name());
+                        }
                     }
-                } else {
-                    panic!("No entries. Please define entries in $XDG_CONFIG_HOME/llvmmgmt/entry.toml");
+                    Err(_) => {
+                        eprintln!(
+                            "No entries. Please define entries in $XDG_CONFIG_HOME/llvmmgmt/entry.toml"
+                        );
+                        exit(1);
+                    }
                 }
                 Ok(())
             } else {
@@ -185,7 +192,9 @@ fn main() -> error::Result<()> {
         }
         LLVMMgmt::Init => config::init_config(),
         LLVMMgmt::Shell { shell } => {
-            let shell = shell.or_else(|| env::var("SHELL").ok()).unwrap_or_else(|| "bash".to_string());
+            let shell = shell
+                .or_else(|| env::var("SHELL").ok())
+                .unwrap_or_else(|| "bash".to_string());
             let script = match shell.as_str() {
                 "zsh" => ZSH_SCRIPT,
                 "bash" => BASH_SCRIPT,
@@ -203,41 +212,87 @@ fn main() -> error::Result<()> {
             }
             Ok(())
         }
-        LLVMMgmt::BuildEntry { name, nproc } => {
-            let entry = entry::load_entry(&name)?;
-            entry.build(nproc)?;
-            Ok(())
-        }
-        LLVMMgmt::CleanCache { name } => {
-            let entry = entry::load_entry(&name)?;
-            entry.clean_cache_dir()?;
-            Ok(())
-        }
-        LLVMMgmt::CleanBuild { name } => {
-            let entry = entry::load_entry(&name)?;
-            entry.clean_build_dir()?;
-            Ok(())
-        }
-        LLVMMgmt::Checkout { name } => {
-            let entry = entry::load_entry(&name)?;
-            entry.checkout()?;
-            Ok(())
-        }
-        LLVMMgmt::Update { name } => {
-            let entry = entry::load_entry(&name)?;
-            entry.update()?;
-            Ok(())
-        }
-        LLVMMgmt::SetGlobal { name } => {
-            let build = Build::from_name(&name)?;
-            build.set_global()?;
-            Ok(())
-        }
-        LLVMMgmt::SetLocal { name } => {
-            let build = Build::from_name(&name)?;
-            build.set_local(&env::current_dir()?)?;
-            Ok(())
-        }
+        LLVMMgmt::Entry(cmd) => match cmd {
+            EntryCmd::Build { name, nproc } => {
+                let entry = entry::load_entry(&name)?;
+                entry.build(nproc)?;
+                Ok(())
+            }
+            EntryCmd::CleanCache { name } => {
+                let entry = entry::load_entry(&name)?;
+                entry.clean_cache_dir()?;
+                Ok(())
+            }
+            EntryCmd::CleanBuild { name } => {
+                let entry = entry::load_entry(&name)?;
+                entry.clean_build_dir()?;
+                Ok(())
+            }
+            EntryCmd::Checkout { name } => {
+                let entry = entry::load_entry(&name)?;
+                entry.checkout()?;
+                Ok(())
+            }
+            EntryCmd::Update { name } => {
+                let entry = entry::load_entry(&name)?;
+                entry.update()?;
+                Ok(())
+            }
+            EntryCmd::SetBuildType { name, build_type } => {
+                let mut entry = entry::load_entry(&name)?;
+                entry.set_build_type(build_type)?;
+                let global_toml = config_dir()?.join(ENTRY_TOML);
+                let mut entries = entry::load_entry_toml(
+                    &fs::read_to_string(&global_toml).with(&global_toml)?,
+                )?;
+                let mut found = false;
+                for e in entries.iter_mut() {
+                    if e.name() == entry.name() {
+                        *e = entry;
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    eprintln!("Entry '{}' not found in {}", name, global_toml.display());
+                    exit(1);
+                }
+                let mut map = HashMap::new();
+                for e in entries {
+                    map.insert(e.name().to_string(), e.setting().clone());
+                }
+                let toml_str = toml::to_string(&map)?;
+                fs::write(&global_toml, toml_str).with(&global_toml)?;
+                Ok(())
+            }
+            EntryCmd::SetGenerator { name, generator } => {
+                let mut entry = entry::load_entry(&name)?;
+                entry.set_builder(&generator)?;
+                let global_toml = config_dir()?.join(ENTRY_TOML);
+                let mut entries = entry::load_entry_toml(
+                    &fs::read_to_string(&global_toml).with(&global_toml)?,
+                )?;
+                let mut found = false;
+                for e in entries.iter_mut() {
+                    if e.name() == entry.name() {
+                        *e = entry;
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    eprintln!("Entry '{}' not found in {}", name, global_toml.display());
+                    exit(1);
+                }
+                let mut map = HashMap::new();
+                for e in entries {
+                    map.insert(e.name().to_string(), e.setting().clone());
+                }
+                let toml_str = toml::to_string(&map)?;
+                fs::write(&global_toml, toml_str).with(&global_toml)?;
+                Ok(())
+            }
+        },
         LLVMMgmt::Prefix { verbose } => {
             let build = seek_build()?;
             if verbose {
@@ -260,60 +315,6 @@ fn main() -> error::Result<()> {
         LLVMMgmt::Uninstall { name } => {
             let build = Build::from_name(&name)?;
             build.uninstall()?;
-            Ok(())
-        }
-        LLVMMgmt::SetBuildType { name, build_type } => {
-            let mut entry = entry::load_entry(&name)?;
-            entry.set_build_type(build_type)?;
-            let global_toml = config_dir()?.join(ENTRY_TOML);
-            let mut entries = entry::load_entry_toml(
-                &fs::read_to_string(&global_toml).with(&global_toml)?,
-            )?;
-            let mut found = false;
-            for e in entries.iter_mut() {
-                if e.name() == entry.name() {
-                    *e = entry;
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                eprintln!("Entry '{}' not found in {}", name, global_toml.display());
-                exit(1);
-            }
-            let mut map = HashMap::new();
-            for e in entries {
-                map.insert(e.name().to_string(), e.setting().clone());
-            }
-            let toml_str = toml::to_string(&map)?;
-            fs::write(&global_toml, toml_str).with(&global_toml)?;
-            Ok(())
-        }
-        LLVMMgmt::SetGenerator { name, generator } => {
-            let mut entry = entry::load_entry(&name)?;
-            entry.set_builder(&generator)?;
-            let global_toml = config_dir()?.join(ENTRY_TOML);
-            let mut entries = entry::load_entry_toml(
-                &fs::read_to_string(&global_toml).with(&global_toml)?,
-            )?;
-            let mut found = false;
-            for e in entries.iter_mut() {
-                if e.name() == entry.name() {
-                    *e = entry;
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                eprintln!("Entry '{}' not found in {}", name, global_toml.display());
-                exit(1);
-            }
-            let mut map = HashMap::new();
-            for e in entries {
-                map.insert(e.name().to_string(), e.setting().clone());
-            }
-            let toml_str = toml::to_string(&map)?;
-            fs::write(&global_toml, toml_str).with(&global_toml)?;
             Ok(())
         }
     }
